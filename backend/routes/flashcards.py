@@ -41,6 +41,7 @@ async def create_flashcard_set(current_user):
         )
         session.add(new_set)
         await session.commit()
+        await session.refresh(new_set)
         
         return jsonify({
             'id': new_set.id,
@@ -104,6 +105,7 @@ async def create_flashcard(current_user, set_id):
         )
         session.add(new_card)
         await session.commit()
+        await session.refresh(new_card)
         
         return jsonify({
             'id': new_card.id,

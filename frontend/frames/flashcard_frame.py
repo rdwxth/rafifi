@@ -16,14 +16,16 @@ class FlashcardFrame(ctk.CTkFrame):
         # Header
         self.header = ctk.CTkFrame(self)
         self.header.grid(row=0, column=0, sticky="ew", padx=20, pady=(20,0))
+        self.header.grid_columnconfigure(0, weight=1)  # Make title expand
         
         self.title = ctk.CTkLabel(self.header, text="Flashcards",
                                 font=ctk.CTkFont(size=24, weight="bold"))
-        self.title.pack(side="left", padx=10)
+        self.title.grid(row=0, column=0, sticky="w", padx=10)
         
         self.create_set_button = ctk.CTkButton(self.header, text="Create New Set",
-                                             command=self.show_create_set)
-        self.create_set_button.pack(side="right", padx=10)
+                                             command=self.show_create_set,
+                                             width=120)  # Fixed width
+        self.create_set_button.grid(row=0, column=1, padx=10)
 
         # Main content area with sets list and flashcard view
         self.content = ctk.CTkFrame(self)
