@@ -1,8 +1,8 @@
 import subprocess
+import sys
 
 subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
 
-import sys
 import time
 import webbrowser
 import os
