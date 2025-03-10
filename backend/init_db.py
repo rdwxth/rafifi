@@ -1,129 +1,174 @@
-import asyncio
-import bcrypt
+from sqlalchemy import create_engine
+from sqlalchemy.sql import text
 from datetime import datetime, timedelta
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+import bcrypt
+import hashlib
+import os
+
+# Import models
 from models import (Base, User, FlashcardSet, Flashcard, Test,
-                   Timetable, TimetableSlot, Target, Class, ClassMember)
+                   TestQuestion, TestResult, Timetable, Target, UserTitle)
 
-# Create async engine
-engine = create_async_engine('sqlite+aiosqlite:///revision_app.db', echo=True)
-async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+def generate_hash_key(prefix, *args):
+    """Generate a hash key for database objects"""
+    timestamp = datetime.utcnow().timestamp()
+    data = f"{prefix}:{':'.join(str(arg) for arg in args)}:{timestamp}"
+    return hashlib.sha256(data.encode()).hexdigest()
 
-async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
+def init_db():
+    # Use relative path from current directory
+    engine = create_engine('sqlite:///database/rafifi.db')
+    Base.metadata.drop_all(engine)  # Drop all tables first
+    Base.metadata.create_all(engine)
     
     # Create sample data
-    async with async_session() as session:
+    with engine.connect() as conn:
         # Create sample user
-        hashed = bcrypt.hashpw('password123'.encode('utf-8'), bcrypt.gensalt())
-        user = User(
-            username='student1',
-            password=hashed.decode('utf-8'),
-            email='student1@example.com',
-            xp=100
+        password = bcrypt.hashpw('password123'.encode('utf-8'), bcrypt.gensalt())
+        conn.execute(
+            User.__table__.insert(),
+            {
+                'username': 'student1',
+                'password': password,
+                'email': 'student1@example.com',
+                'xp': 0,
+                'created_at': datetime.utcnow()
+            }
         )
-        session.add(user)
-        await session.flush()
+        conn.commit()
         
-        # Create sample flashcard sets
-        math_set = FlashcardSet(
-            name='Math Formulas',
-            folder='Mathematics',
-            user_id=user.id
+        # Get the user's ID
+        result = conn.execute(text("SELECT id FROM users WHERE username = 'student1'"))
+        user_id = result.scalar()
+        
+        # Add initial title
+        conn.execute(
+            UserTitle.__table__.insert(),
+            {
+                'user_id': user_id,
+                'title': 'Beginner',
+                'earned_at': datetime.utcnow()
+            }
         )
-        session.add(math_set)
-        await session.flush()
+        
+        # Create sample flashcard set
+        set_hash = generate_hash_key('set', user_id, 'Sample Set')
+        conn.execute(
+            FlashcardSet.__table__.insert(),
+            {
+                'user_id': user_id,
+                'name': 'Sample Set',
+                'description': 'A sample flashcard set',
+                'folder': 'General',
+                'priority': 1,
+                'hash_key': set_hash,
+                'created_at': datetime.utcnow()
+            }
+        )
+        
+        # Get the set's ID
+        result = conn.execute(text("SELECT id FROM flashcard_sets WHERE user_id = :user_id"), {'user_id': user_id})
+        set_id = result.scalar()
         
         # Create sample flashcards
-        flashcards = [
-            Flashcard(
-                front='What is the quadratic formula?',
-                back='x = (-b ± √(b² - 4ac)) / 2a',
-                difficulty='medium',
-                set_id=math_set.id
-            ),
-            Flashcard(
-                front='What is the formula for the area of a circle?',
-                back='A = πr²',
-                difficulty='easy',
-                set_id=math_set.id
-            ),
-            Flashcard(
-                front='What is the Pythagorean theorem?',
-                back='a² + b² = c²',
-                difficulty='easy',
-                set_id=math_set.id
-            )
-        ]
-        for card in flashcards:
-            session.add(card)
+        conn.execute(
+            Flashcard.__table__.insert(),
+            [
+                {
+                    'set_id': set_id,
+                    'front': 'What is a Priority Queue?',
+                    'back': 'A data structure where elements have priorities and higher priority elements are served first',
+                    'priority': 3,
+                    'hash_key': generate_hash_key('card', set_id, 'Priority Queue'),
+                    'incorrect_count': 0,
+                    'last_reviewed': datetime.utcnow() - timedelta(days=7)
+                },
+                {
+                    'set_id': set_id,
+                    'front': 'What is Merge Sort?',
+                    'back': 'A divide-and-conquer sorting algorithm with O(n log n) time complexity',
+                    'priority': 2,
+                    'hash_key': generate_hash_key('card', set_id, 'Merge Sort'),
+                    'incorrect_count': 0,
+                    'last_reviewed': datetime.utcnow() - timedelta(days=3)
+                }
+            ]
+        )
+        
+        # Create sample test
+        conn.execute(
+            Test.__table__.insert(),
+            {
+                'user_id': user_id,
+                'name': 'Sample Test',
+                'description': 'A sample test',
+                'created_at': datetime.utcnow()
+            }
+        )
+        
+        # Get the test's ID
+        result = conn.execute(text("SELECT id FROM tests WHERE user_id = :user_id"), {'user_id': user_id})
+        test_id = result.scalar()
+        
+        # Get flashcard IDs
+        result = conn.execute(text("SELECT id FROM flashcards WHERE set_id = :set_id"), {'set_id': set_id})
+        flashcard_ids = [row[0] for row in result]
+        
+        # Create sample test questions
+        conn.execute(
+            TestQuestion.__table__.insert(),
+            [
+                {
+                    'test_id': test_id,
+                    'flashcard_id': flashcard_ids[0],
+                    'order': 1,
+                    'correct': None
+                },
+                {
+                    'test_id': test_id,
+                    'flashcard_id': flashcard_ids[1],
+                    'order': 2,
+                    'correct': None
+                }
+            ]
+        )
         
         # Create sample timetable
-        timetable = Timetable(
-            user_id=user.id,
-            week_start=datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today = datetime.now()
+        monday = today - timedelta(days=today.weekday())
+        conn.execute(
+            Timetable.__table__.insert(),
+            {
+                'user_id': user_id,
+                'week_start': monday,
+                'created_at': datetime.utcnow()
+            }
         )
-        session.add(timetable)
-        await session.flush()
         
-        # Create sample timetable slots
-        slots = [
-            TimetableSlot(
-                timetable_id=timetable.id,
-                day=0,  # Monday
-                start_time=9*60,  # 9:00 AM
-                duration=60,  # 1 hour
-                subject='Mathematics'
-            ),
-            TimetableSlot(
-                timetable_id=timetable.id,
-                day=2,  # Wednesday
-                start_time=14*60,  # 2:00 PM
-                duration=90,  # 1.5 hours
-                subject='Physics'
-            )
-        ]
-        for slot in slots:
-            session.add(slot)
+        # Get the timetable's ID
+        result = conn.execute(text("SELECT id FROM timetables WHERE user_id = :user_id"), {'user_id': user_id})
+        timetable_id = result.scalar()
         
         # Create sample targets
-        targets = [
-            Target(
-                timetable_id=timetable.id,
-                description='Complete Math chapter 1',
-                completed=False
-            ),
-            Target(
-                timetable_id=timetable.id,
-                description='Review Physics formulas',
-                completed=True
-            )
-        ]
-        for target in targets:
-            session.add(target)
-        
-        # Create sample class
-        class_ = Class(
-            name='Advanced Mathematics',
-            code='MATH101',
-            leader_id=user.id
+        conn.execute(
+            Target.__table__.insert(),
+            [
+                {
+                    'timetable_id': timetable_id,
+                    'day': 0,  # Monday
+                    'description': 'Review Priority Queues',
+                    'completed': False
+                },
+                {
+                    'timetable_id': timetable_id,
+                    'day': 1,  # Tuesday
+                    'description': 'Practice Merge Sort',
+                    'completed': False
+                }
+            ]
         )
-        session.add(class_)
-        await session.flush()
         
-        # Add user as class member
-        member = ClassMember(
-            class_id=class_.id,
-            user_id=user.id
-        )
-        session.add(member)
-        
-        await session.commit()
+        conn.commit()
 
 if __name__ == '__main__':
-    print('Initializing database with sample data...')
-    asyncio.run(init_db())
-    print('Database initialized successfully!')
+    init_db()

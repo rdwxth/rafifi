@@ -86,6 +86,44 @@ class FlashcardFrame(ctk.CTkFrame):
         self.wait_window(dialog)
         self.update_sets_list()
 
+    def show_edit_set(self, set_data):
+        dialog = EditSetDialog(self, set_data)
+        self.wait_window(dialog)
+        self.update_sets_list()
+
+    def copy_set(self, set_data):
+        try:
+            headers = {'Authorization': f'Bearer {self.controller.token}'}
+            response = requests.post('http://localhost:5000/flashcard/sets/copy',
+                                 json={'set_id': set_data['id']},
+                                 headers=headers)
+            
+            if response.status_code == 201:
+                messagebox.showinfo("Success", "Flashcard set copied successfully")
+                self.update_sets_list()
+            else:
+                messagebox.showerror("Error", "Failed to copy flashcard set")
+        except requests.exceptions.RequestException:
+            messagebox.showerror("Error", "Could not connect to server")
+
+    def delete_set(self, set_data):
+        if messagebox.askyesno("Confirm Delete", 
+                             f"Are you sure you want to delete '{set_data['name']}'?"):
+            try:
+                headers = {'Authorization': f'Bearer {self.controller.token}'}
+                response = requests.delete(
+                    f'http://localhost:5000/flashcard/sets/{set_data["id"]}',
+                    headers=headers
+                )
+                
+                if response.status_code == 204:
+                    messagebox.showinfo("Success", "Flashcard set deleted successfully")
+                    self.update_sets_list()
+                else:
+                    messagebox.showerror("Error", "Failed to delete flashcard set")
+            except requests.exceptions.RequestException:
+                messagebox.showerror("Error", "Could not connect to server")
+
     def update_sets_list(self):
         # Clear existing sets
         for widget in self.sets_list.winfo_children():
@@ -98,9 +136,29 @@ class FlashcardFrame(ctk.CTkFrame):
             if response.status_code == 200:
                 sets = response.json()
                 for set_data in sets:
-                    btn = ctk.CTkButton(self.sets_list, text=set_data['name'],
-                                     command=lambda s=set_data: self.load_set(s))
-                    btn.pack(fill="x", pady=2)
+                    set_frame = ctk.CTkFrame(self.sets_list)
+                    set_frame.pack(fill="x", pady=2)
+
+                    # Set name button
+                    name_btn = ctk.CTkButton(set_frame, text=set_data['name'],
+                                         command=lambda s=set_data: self.load_set(s))
+                    name_btn.pack(side="left", expand=True, fill="x", padx=2)
+
+                    # Action buttons
+                    edit_btn = ctk.CTkButton(set_frame, text="Edit",
+                                         command=lambda s=set_data: self.show_edit_set(s),
+                                         width=60)
+                    edit_btn.pack(side="left", padx=2)
+
+                    copy_btn = ctk.CTkButton(set_frame, text="Copy",
+                                         command=lambda s=set_data: self.copy_set(s),
+                                         width=60)
+                    copy_btn.pack(side="left", padx=2)
+
+                    delete_btn = ctk.CTkButton(set_frame, text="Delete",
+                                           command=lambda s=set_data: self.delete_set(s),
+                                           width=60)
+                    delete_btn.pack(side="left", padx=2)
         except requests.exceptions.RequestException:
             messagebox.showerror("Error", "Could not fetch flashcard sets")
 
@@ -190,89 +248,219 @@ class CreateSetDialog(ctk.CTkToplevel):
         self.cards_frame = ctk.CTkScrollableFrame(self)
         self.cards_frame.pack(expand=True, fill="both", padx=20, pady=10)
         
-        self.add_card_button = ctk.CTkButton(self, text="Add Card",
-                                          command=self.add_card_fields)
-        self.add_card_button.pack(pady=10)
+        # Buttons frame
+        self.buttons_frame = ctk.CTkFrame(self)
+        self.buttons_frame.pack(fill="x", padx=20, pady=10)
         
-        self.save_button = ctk.CTkButton(self, text="Save Set",
-                                      command=self.save_set)
-        self.save_button.pack(pady=10)
+        self.add_card_button = ctk.CTkButton(self.buttons_frame, text="Add Card",
+                                          command=self.add_card_fields)
+        self.add_card_button.pack(side="left", padx=5)
+        
+        self.save_deck_button = ctk.CTkButton(self.buttons_frame, text="Save Deck",
+                                          command=self.save_set)
+        self.save_deck_button.pack(side="right", padx=5)
 
         # Add first card
         self.cards = []
         self.add_card_fields()
 
-    def add_card_fields(self):
+    def add_card_fields(self, card=None):
         card_frame = ctk.CTkFrame(self.cards_frame)
         card_frame.pack(fill="x", pady=5)
-        
-        front_entry = ctk.CTkEntry(card_frame, placeholder_text="Front")
-        front_entry.pack(fill="x", pady=2)
-        
-        back_entry = ctk.CTkEntry(card_frame, placeholder_text="Back")
-        back_entry.pack(fill="x", pady=2)
-        
-        difficulty = ctk.CTkOptionMenu(card_frame,
-                                    values=["easy", "medium", "hard"],
-                                    variable=ctk.StringVar(value="medium"))
-        difficulty.pack(pady=2)
-        
-        remove_button = ctk.CTkButton(card_frame, text="Remove",
-                                   command=lambda: self.remove_card(card_frame))
-        remove_button.pack(pady=2)
-        
-        self.cards.append((card_frame, front_entry, back_entry, difficulty))
 
-    def remove_card(self, card_frame):
-        card_frame.destroy()
-        self.cards = [(f, q, a, d) for f, q, a, d in self.cards if f != card_frame]
+        # Front of card
+        front_frame = ctk.CTkFrame(card_frame)
+        front_frame.pack(fill="x", pady=2)
+        
+        front_label = ctk.CTkLabel(front_frame, text="Front:")
+        front_label.pack(side="left", padx=5)
+        
+        front_entry = ctk.CTkEntry(front_frame)
+        front_entry.pack(side="left", expand=True, fill="x", padx=5)
+
+        # Back of card
+        back_frame = ctk.CTkFrame(card_frame)
+        back_frame.pack(fill="x", pady=2)
+        
+        back_label = ctk.CTkLabel(back_frame, text="Back:")
+        back_label.pack(side="left", padx=5)
+        
+        back_entry = ctk.CTkEntry(back_frame)
+        back_entry.pack(side="left", expand=True, fill="x", padx=5)
+
+        # Difficulty selection
+        diff_frame = ctk.CTkFrame(card_frame)
+        diff_frame.pack(fill="x", pady=2)
+        
+        diff_label = ctk.CTkLabel(diff_frame, text="Difficulty:")
+        diff_label.pack(side="left", padx=5)
+        
+        diff_var = tk.StringVar(value="medium")
+        diff_menu = ctk.CTkOptionMenu(diff_frame, values=["easy", "medium", "hard"],
+                                    variable=diff_var)
+        diff_menu.pack(side="left", padx=5)
+
+        # Delete button
+        delete_btn = ctk.CTkButton(card_frame, text="Delete",
+                                command=lambda: self.delete_card(card_frame))
+        delete_btn.pack(side="right", padx=5)
+
+        if card:
+            front_entry.insert(0, card['front'])
+            back_entry.insert(0, card['back'])
+            diff_var.set(card['difficulty'])
+
+        self.cards.append({
+            'frame': card_frame,
+            'front': front_entry,
+            'back': back_entry,
+            'difficulty': diff_var
+        })
+
+    def delete_card(self, card_frame):
+        for card in self.cards:
+            if card['frame'] == card_frame:
+                self.cards.remove(card)
+                card_frame.destroy()
+                break
 
     def save_set(self):
         name = self.name_entry.get().strip()
         folder = self.folder_entry.get().strip()
         
         if not name:
-            messagebox.showwarning("Warning", "Please enter a set name")
+            messagebox.showerror("Error", "Please enter a set name")
             return
             
         if not self.cards:
-            messagebox.showwarning("Warning", "Please add at least one card")
+            messagebox.showerror("Error", "Please add at least one card")
             return
             
+        # Validate cards
+        cards_data = []
+        for card in self.cards:
+            front = card['front'].get().strip()
+            back = card['back'].get().strip()
+            
+            if not front or not back:
+                messagebox.showerror("Error", "All cards must have front and back content")
+                return
+                
+            cards_data.append({
+                'front': front,
+                'back': back,
+                'difficulty': card['difficulty'].get()
+            })
+
         try:
             # Create set
             headers = {'Authorization': f'Bearer {self.parent.controller.token}'}
             response = requests.post('http://localhost:5000/flashcard/sets',
-                                  headers=headers,
-                                  json={'name': name, 'folder': folder})
+                                 json={'name': name, 'folder': folder},
+                                 headers=headers)
             
-            if response.status_code != 201:
-                messagebox.showerror("Error", "Failed to create flashcard set")
-                return
+            if response.status_code == 201:
+                set_data = response.json()
                 
-            set_data = response.json()
-            
-            # Add cards
-            for _, front_entry, back_entry, difficulty in self.cards:
-                front = front_entry.get().strip()
-                back = back_entry.get().strip()
-                
-                if front and back:  # Only add cards with both front and back
+                # Add cards
+                for card_data in cards_data:
                     response = requests.post(
                         f'http://localhost:5000/flashcard/sets/{set_data["id"]}/cards',
-                        headers=headers,
-                        json={
-                            'front': front,
-                            'back': back,
-                            'difficulty': difficulty.get()
-                        }
+                        json=card_data,
+                        headers=headers
                     )
                     
                     if response.status_code != 201:
-                        messagebox.showwarning("Warning", f"Failed to add card: {front}")
+                        raise Exception("Failed to create card")
+                        
+                messagebox.showinfo("Success", "Flashcard set created successfully")
+                self.destroy()
+            else:
+                messagebox.showerror("Error", "Failed to create flashcard set")
+        except requests.exceptions.RequestException:
+            messagebox.showerror("Error", "Could not connect to server")
+
+class EditSetDialog(CreateSetDialog):
+    def __init__(self, parent, set_data):
+        super().__init__(parent)
+        self.set_data = set_data
+        self.title("Edit Flashcard Set")
+        
+        # Set existing values
+        self.name_entry.insert(0, set_data['name'])
+        self.folder_entry.insert(0, set_data['folder'])
+        
+        # Load existing cards
+        try:
+            headers = {'Authorization': f'Bearer {self.parent.controller.token}'}
+            response = requests.get(
+                f'http://localhost:5000/flashcard/sets/{set_data["id"]}',
+                headers=headers
+            )
             
+            if response.status_code == 200:
+                set_info = response.json()
+                for card in set_info['flashcards']:
+                    self.add_card_fields(card)
+            else:
+                messagebox.showerror("Error", "Failed to load flashcard set")
+                self.destroy()
+        except requests.exceptions.RequestException:
+            messagebox.showerror("Error", "Could not connect to server")
             self.destroy()
+
+    def save_set(self):
+        name = self.name_entry.get().strip()
+        folder = self.folder_entry.get().strip()
+        
+        if not name:
+            messagebox.showerror("Error", "Please enter a set name")
+            return
             
+        if not self.cards:
+            messagebox.showerror("Error", "Please add at least one card")
+            return
+            
+        # Validate cards
+        cards_data = []
+        for card in self.cards:
+            front = card['front'].get().strip()
+            back = card['back'].get().strip()
+            
+            if not front or not back:
+                messagebox.showerror("Error", "All cards must have front and back content")
+                return
+                
+            cards_data.append({
+                'front': front,
+                'back': back,
+                'difficulty': card['difficulty'].get()
+            })
+
+        try:
+            # Update set
+            headers = {'Authorization': f'Bearer {self.parent.controller.token}'}
+            response = requests.put(
+                f'http://localhost:5000/flashcard/sets/{self.set_data["id"]}',
+                json={'name': name, 'folder': folder},
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                # Update cards
+                response = requests.put(
+                    f'http://localhost:5000/flashcard/sets/{self.set_data["id"]}/cards',
+                    json={'cards': cards_data},
+                    headers=headers
+                )
+                
+                if response.status_code == 200:
+                    messagebox.showinfo("Success", "Flashcard set updated successfully")
+                    self.destroy()
+                else:
+                    messagebox.showerror("Error", "Failed to update cards")
+            else:
+                messagebox.showerror("Error", "Failed to update flashcard set")
         except requests.exceptions.RequestException:
             messagebox.showerror("Error", "Could not connect to server")
 

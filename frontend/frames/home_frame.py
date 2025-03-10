@@ -30,7 +30,7 @@ class HomeFrame(ctk.CTkFrame):
             button_frame,
             "Flashcards",
             "Study and create flashcard sets",
-            lambda: self.controller.show_frame("flashcards"),
+            lambda: self.controller.show_frame("FlashcardFrame"),  
             0, 0
         )
 
@@ -38,7 +38,7 @@ class HomeFrame(ctk.CTkFrame):
             button_frame,
             "Tests",
             "Take tests based on your flashcards",
-            lambda: self.controller.show_frame("tests"),
+            lambda: self.controller.show_frame("TestFrame"),
             0, 1
         )
 
@@ -46,7 +46,7 @@ class HomeFrame(ctk.CTkFrame):
             button_frame,
             "Timetable",
             "Plan your weekly study schedule",
-            lambda: self.controller.show_frame("timetable"),
+            lambda: self.controller.show_frame("TimetableFrame"),
             1, 0
         )
 
@@ -54,7 +54,7 @@ class HomeFrame(ctk.CTkFrame):
             button_frame,
             "Classes",
             "Join study groups and compete",
-            lambda: self.controller.show_frame("classes"),
+            lambda: self.controller.show_frame("ClassFrame"),
             1, 1
         )
 
@@ -62,7 +62,7 @@ class HomeFrame(ctk.CTkFrame):
             button_frame,
             "Progress",
             "Track your learning journey",
-            lambda: self.controller.show_frame("progress"),
+            lambda: self.controller.show_frame("ProgressFrame"),
             2, 0
         )
 
@@ -70,7 +70,7 @@ class HomeFrame(ctk.CTkFrame):
             button_frame,
             "Settings",
             "Customize your experience",
-            lambda: self.controller.show_frame("settings"),
+            lambda: self.controller.show_frame("SettingsFrame"),
             2, 1
         )
 
@@ -89,7 +89,7 @@ class HomeFrame(ctk.CTkFrame):
         # Streak
         streak_label = ctk.CTkLabel(
             stats_frame,
-            text="🔥 7 Day Streak",
+            text=" 7 Day Streak",
             font=("Helvetica", 16)
         )
         streak_label.pack(side="right", padx=20)

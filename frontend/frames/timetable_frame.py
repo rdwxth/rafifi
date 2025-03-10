@@ -199,153 +199,174 @@ class CreateTimetableDialog(ctk.CTkToplevel):
         self.week_frame = ctk.CTkFrame(self)
         self.week_frame.pack(fill="x", padx=20, pady=20)
         
-        self.week_label = ctk.CTkLabel(self.week_frame,
-                                    text=f"Week of {monday.strftime('%B %d, %Y')}")
-        self.week_label.pack()
+        self.week_label = ctk.CTkLabel(self.week_frame, text="Week Starting:")
+        self.week_label.pack(side="left", padx=5)
+        
+        self.week_start = monday
+        self.week_display = ctk.CTkLabel(
+            self.week_frame,
+            text=monday.strftime("%B %d, %Y")
+        )
+        self.week_display.pack(side="left", padx=5)
 
         # Copy previous week option
         self.copy_frame = ctk.CTkFrame(self)
         self.copy_frame.pack(fill="x", padx=20, pady=10)
         
         self.copy_var = tk.BooleanVar(value=False)
-        self.copy_check = ctk.CTkCheckBox(self.copy_frame,
-                                       text="Copy targets from previous week",
-                                       variable=self.copy_var,
-                                       command=self.toggle_copy)
-        self.copy_check.pack()
+        self.copy_check = ctk.CTkCheckBox(
+            self.copy_frame,
+            text="Copy goals from previous week",
+            variable=self.copy_var,
+            command=self.toggle_copy
+        )
+        self.copy_check.pack(side="left", padx=5)
 
-        # Days container
-        self.days_container = ctk.CTkScrollableFrame(self)
-        self.days_container.pack(expand=True, fill="both", padx=20, pady=10)
+        # Daily targets
+        self.days_frame = ctk.CTkScrollableFrame(self)
+        self.days_frame.pack(fill="both", expand=True, padx=20, pady=10)
         
-        # Create frames for each day
-        self.day_frames = {}
-        days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday',
-                'Saturday', 'Sunday']
+        self.day_targets = {}  # Store targets for each day
+        days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
         
         for i, day in enumerate(days):
-            frame = ctk.CTkFrame(self.days_container)
-            frame.pack(fill="x", pady=5)
+            day_frame = ctk.CTkFrame(self.days_frame)
+            day_frame.pack(fill="x", pady=5)
             
-            label = ctk.CTkLabel(frame, text=day,
-                              font=ctk.CTkFont(weight="bold"))
-            label.pack(pady=5)
+            day_label = ctk.CTkLabel(day_frame, text=day,
+                                  font=ctk.CTkFont(weight="bold"))
+            day_label.pack(pady=5)
             
-            targets_frame = ctk.CTkFrame(frame)
+            targets_frame = ctk.CTkFrame(day_frame)
             targets_frame.pack(fill="x", padx=10, pady=5)
             
-            add_btn = ctk.CTkButton(frame, text="Add Target",
-                                 command=lambda d=i: self.add_target(d))
+            # Add target button
+            max_targets = 5 if i >= 5 else 3  # 5 for weekends, 3 for weekdays
+            add_btn = ctk.CTkButton(
+                day_frame,
+                text=f"Add Target (0/{max_targets})",
+                command=lambda d=i: self.add_target(d)
+            )
             add_btn.pack(pady=5)
             
-            self.day_frames[i] = targets_frame
-
-        # Save button
-        self.save_button = ctk.CTkButton(self, text="Save Timetable",
-                                      command=self.save_timetable)
-        self.save_button.pack(pady=20)
-
-        # Initialize with previous week's targets if requested
-        if self.copy_var.get():
-            self.load_previous_targets()
+            self.day_targets[i] = {
+                'frame': targets_frame,
+                'button': add_btn,
+                'targets': [],
+                'max_targets': max_targets
+            }
+        
+        # Create button
+        self.create_button = ctk.CTkButton(self, text="Create Timetable",
+                                       command=self.create_timetable)
+        self.create_button.pack(pady=20)
 
     def toggle_copy(self):
         if self.copy_var.get():
-            self.load_previous_targets()
-        else:
-            # Clear all targets
-            for frame in self.day_frames.values():
-                for widget in frame.winfo_children():
-                    widget.destroy()
-
-    def load_previous_targets(self):
-        try:
-            headers = {'Authorization': f'Bearer {self.parent.controller.token}'}
-            response = requests.get('http://localhost:5000/timetable/current',
-                                 headers=headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                targets_by_day = data['targets']
+            try:
+                headers = {'Authorization': f'Bearer {self.parent.controller.token}'}
+                response = requests.get('http://localhost:5000/timetable/current',
+                                    headers=headers)
                 
-                for day, targets in targets_by_day.items():
-                    day_idx = int(day)
-                    frame = self.day_frames[day_idx]
-                    
+                if response.status_code == 200:
+                    data = response.json()
                     # Clear existing targets
-                    for widget in frame.winfo_children():
-                        widget.destroy()
+                    for day_data in self.day_targets.values():
+                        for target in day_data['targets']:
+                            target['frame'].destroy()
+                        day_data['targets'] = []
+                        self.update_add_button(day_data)
                     
-                    # Add previous targets
-                    for target in targets:
-                        self.add_target(day_idx, target['description'])
-                        
-        except requests.exceptions.RequestException:
-            messagebox.showerror("Error", "Could not load previous timetable")
+                    # Add targets from previous week
+                    for day, targets in data['targets'].items():
+                        day = int(day)
+                        for target in targets:
+                            self.add_target(day, target['description'])
+                else:
+                    messagebox.showwarning("Warning", "No previous timetable to copy from")
+                    self.copy_var.set(False)
+                    
+            except requests.exceptions.RequestException:
+                messagebox.showerror("Error", "Could not fetch previous timetable")
+                self.copy_var.set(False)
 
-    def add_target(self, day, initial_text=""):
-        frame = self.day_frames[day]
-        max_targets = 5 if day in [5, 6] else 3
+    def update_add_button(self, day_data):
+        count = len(day_data['targets'])
+        max_targets = day_data['max_targets']
+        day_data['button'].configure(
+            text=f"Add Target ({count}/{max_targets})",
+            state="normal" if count < max_targets else "disabled"
+        )
+
+    def add_target(self, day, description=""):
+        day_data = self.day_targets[day]
         
-        if len(frame.winfo_children()) >= max_targets:
-            messagebox.showwarning("Warning",
-                                f"Maximum {max_targets} targets allowed for this day")
+        if len(day_data['targets']) >= day_data['max_targets']:
+            messagebox.showwarning(
+                "Warning",
+                f"Maximum {day_data['max_targets']} targets allowed for this day"
+            )
             return
-            
-        target_frame = ctk.CTkFrame(frame)
+        
+        target_frame = ctk.CTkFrame(day_data['frame'])
         target_frame.pack(fill="x", pady=2)
         
         entry = ctk.CTkEntry(target_frame)
         entry.pack(side="left", expand=True, fill="x", padx=5)
-        entry.insert(0, initial_text)
+        entry.insert(0, description)
         
-        def remove_target():
-            target_frame.destroy()
-            
-        remove_btn = ctk.CTkButton(target_frame, text="Remove",
-                                width=60, command=remove_target)
-        remove_btn.pack(side="right", padx=5)
-
-    def save_timetable(self):
-        targets = {}
+        delete_btn = ctk.CTkButton(target_frame, text="✕", width=30,
+                                command=lambda: self.delete_target(day, target_frame))
+        delete_btn.pack(side="right", padx=5)
         
-        for day, frame in self.day_frames.items():
-            day_targets = []
-            for target_frame in frame.winfo_children():
-                entry = target_frame.winfo_children()[0]
-                text = entry.get().strip()
-                if text:
-                    day_targets.append(text)
-            if day_targets:
-                targets[day] = day_targets
+        day_data['targets'].append({
+            'frame': target_frame,
+            'entry': entry
+        })
+        
+        self.update_add_button(day_data)
 
-        if not targets:
-            messagebox.showwarning("Warning", "Please add at least one target")
+    def delete_target(self, day, target_frame):
+        day_data = self.day_targets[day]
+        day_data['targets'] = [t for t in day_data['targets']
+                             if t['frame'] != target_frame]
+        target_frame.destroy()
+        self.update_add_button(day_data)
+
+    def create_timetable(self):
+        # Validate targets
+        targets_by_day = {}
+        for day, day_data in self.day_targets.items():
+            targets = []
+            for target in day_data['targets']:
+                description = target['entry'].get().strip()
+                if description:
+                    targets.append(description)
+            if targets:
+                targets_by_day[day] = targets
+        
+        if not targets_by_day:
+            messagebox.showerror("Error", "Please add at least one target")
             return
-
+        
         try:
+            # Create timetable
             headers = {'Authorization': f'Bearer {self.parent.controller.token}'}
-            
-            # Format data for API
-            today = datetime.now()
-            monday = today - timedelta(days=today.weekday())
-            
-            data = {
-                'week_start': monday.strftime('%Y-%m-%d'),
-                'targets': [
-                    {'day': day, 'targets': targets}
-                    for day, targets in targets.items()
-                ]
-            }
-            
-            response = requests.post('http://localhost:5000/timetable',
-                                  headers=headers, json=data)
+            response = requests.post(
+                'http://localhost:5000/timetable/',
+                json={
+                    'week_start': self.week_start.isoformat(),
+                    'targets': targets_by_day
+                },
+                headers=headers
+            )
             
             if response.status_code == 201:
                 messagebox.showinfo("Success", "Timetable created successfully")
                 self.destroy()
             else:
-                messagebox.showerror("Error", "Failed to create timetable")
+                error_msg = response.json().get('message', 'Failed to create timetable')
+                messagebox.showerror("Error", error_msg)
                 
         except requests.exceptions.RequestException:
             messagebox.showerror("Error", "Could not connect to server")

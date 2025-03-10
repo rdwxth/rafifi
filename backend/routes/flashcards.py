@@ -1,7 +1,8 @@
 from quart import Blueprint, request, jsonify
-from sqlalchemy import select, desc
+from sqlalchemy import select, func, desc, delete
 from models import FlashcardSet, Flashcard, Test, User
-from utils import token_required, async_session
+from utils import token_required, generate_hash_key
+from database import db
 from datetime import datetime
 
 flashcard_bp = Blueprint('flashcard', __name__)
@@ -9,7 +10,7 @@ flashcard_bp = Blueprint('flashcard', __name__)
 @flashcard_bp.route('/sets', methods=['GET'])
 @token_required
 async def get_flashcard_sets(current_user):
-    async with async_session() as session:
+    async with db.session() as session:
         result = await session.execute(
             select(FlashcardSet)
             .where(FlashcardSet.user_id == current_user.id)
@@ -33,11 +34,12 @@ async def create_flashcard_set(current_user):
     if 'name' not in data:
         return jsonify({'message': 'Missing name'}), 400
     
-    async with async_session() as session:
+    async with db.session() as session:
         new_set = FlashcardSet(
             name=data['name'],
             folder=data.get('folder', 'General'),
-            user_id=current_user.id
+            user_id=current_user.id,
+            hash_key=generate_hash_key('set', current_user.id, data['name'])
         )
         session.add(new_set)
         await session.commit()
@@ -54,7 +56,7 @@ async def create_flashcard_set(current_user):
 @flashcard_bp.route('/sets/<int:set_id>', methods=['GET'])
 @token_required
 async def get_flashcard_set(current_user, set_id):
-    async with async_session() as session:
+    async with db.session() as session:
         result = await session.execute(
             select(FlashcardSet)
             .where(FlashcardSet.id == set_id)
@@ -87,7 +89,7 @@ async def create_flashcard(current_user, set_id):
     if not all(k in data for k in ['front', 'back']):
         return jsonify({'message': 'Missing front or back content'}), 400
     
-    async with async_session() as session:
+    async with db.session() as session:
         # Verify set ownership
         result = await session.execute(
             select(FlashcardSet)
@@ -101,7 +103,8 @@ async def create_flashcard(current_user, set_id):
             front=data['front'],
             back=data['back'],
             difficulty=data.get('difficulty', 'medium'),
-            set_id=set_id
+            set_id=set_id,
+            hash_key=generate_hash_key('card', set_id, data['front'], data['back'])
         )
         session.add(new_card)
         await session.commit()
@@ -120,7 +123,7 @@ async def create_flashcard(current_user, set_id):
 async def update_flashcard(current_user, set_id, card_id):
     data = await request.get_json()
     
-    async with async_session() as session:
+    async with db.session() as session:
         # Verify set ownership
         result = await session.execute(
             select(FlashcardSet)
@@ -144,8 +147,10 @@ async def update_flashcard(current_user, set_id, card_id):
         # Update fields
         if 'front' in data:
             card.front = data['front']
+            card.hash_key = generate_hash_key('card', set_id, data['front'], card.back)
         if 'back' in data:
             card.back = data['back']
+            card.hash_key = generate_hash_key('card', set_id, card.front, data['back'])
         if 'difficulty' in data:
             card.difficulty = data['difficulty']
         
@@ -162,7 +167,7 @@ async def update_flashcard(current_user, set_id, card_id):
 @flashcard_bp.route('/sets/<int:set_id>/cards/<int:card_id>', methods=['DELETE'])
 @token_required
 async def delete_flashcard(current_user, set_id, card_id):
-    async with async_session() as session:
+    async with db.session() as session:
         # Verify set ownership
         result = await session.execute(
             select(FlashcardSet)
@@ -191,7 +196,7 @@ async def delete_flashcard(current_user, set_id, card_id):
 @flashcard_bp.route('/folders', methods=['GET'])
 @token_required
 async def get_folders(current_user):
-    async with async_session() as session:
+    async with db.session() as session:
         result = await session.execute(
             select(FlashcardSet.folder)
             .where(FlashcardSet.user_id == current_user.id)
@@ -207,7 +212,7 @@ async def search_flashcards(current_user):
     query = request.args.get('q', '')
     folder = request.args.get('folder', None)
     
-    async with async_session() as session:
+    async with db.session() as session:
         # Build base query
         base_query = (
             select(FlashcardSet)
@@ -239,7 +244,7 @@ async def get_flashcards(current_user, set_id):
     sort_by = request.args.get('sort', 'difficulty')
     order = request.args.get('order', 'asc')
     
-    async with async_session() as session:
+    async with db.session() as session:
         flashcard_set = await session.get(FlashcardSet, set_id)
         if not flashcard_set or flashcard_set.user_id != current_user.id:
             return jsonify({'message': 'Flashcard set not found'}), 404
@@ -270,7 +275,7 @@ async def submit_test(current_user, set_id):
     if not all(k in data for k in ['score', 'duration']):
         return jsonify({'message': 'Missing score or duration'}), 400
     
-    async with async_session() as session:
+    async with db.session() as session:
         # Verify set exists and user has access
         result = await session.execute(
             select(FlashcardSet)
@@ -298,4 +303,165 @@ async def submit_test(current_user, set_id):
         return jsonify({
             'message': 'Test submitted successfully',
             'xp_gained': xp_gain
+        }), 201
+
+@flashcard_bp.route('/sets/<int:set_id>', methods=['PUT'])
+@token_required
+async def update_flashcard_set(current_user, set_id):
+    data = await request.get_json()
+    
+    if 'name' not in data:
+        return jsonify({'message': 'Missing name'}), 400
+    
+    async with db.session() as session:
+        # Verify set ownership
+        result = await session.execute(
+            select(FlashcardSet)
+            .where(FlashcardSet.id == set_id)
+            .where(FlashcardSet.user_id == current_user.id)
+        )
+        set_ = result.scalar_one_or_none()
+        
+        if not set_:
+            return jsonify({'message': 'Set not found'}), 404
+            
+        # Update set
+        set_.name = data['name']
+        set_.folder = data.get('folder', 'General')
+        set_.hash_key = generate_hash_key('set', current_user.id, data['name'])
+        await session.commit()
+        
+        return jsonify({
+            'id': set_.id,
+            'name': set_.name,
+            'folder': set_.folder,
+            'created_at': set_.created_at.isoformat()
+        })
+
+@flashcard_bp.route('/sets/<int:set_id>/cards', methods=['PUT'])
+@token_required
+async def update_flashcard_set_cards(current_user, set_id):
+    data = await request.get_json()
+    
+    if 'cards' not in data:
+        return jsonify({'message': 'Missing cards data'}), 400
+    
+    async with db.session() as session:
+        # Verify set ownership
+        result = await session.execute(
+            select(FlashcardSet)
+            .where(FlashcardSet.id == set_id)
+            .where(FlashcardSet.user_id == current_user.id)
+        )
+        set_ = result.scalar_one_or_none()
+        
+        if not set_:
+            return jsonify({'message': 'Set not found'}), 404
+            
+        # Delete existing cards
+        await session.execute(
+            delete(Flashcard).where(Flashcard.set_id == set_id)
+        )
+        
+        # Add new cards
+        for card_data in data['cards']:
+            new_card = Flashcard(
+                front=card_data['front'],
+                back=card_data['back'],
+                difficulty=card_data.get('difficulty', 'medium'),
+                set_id=set_id,
+                hash_key=generate_hash_key('card', set_id, card_data['front'], card_data['back'])
+            )
+            session.add(new_card)
+        
+        await session.commit()
+        
+        # Return updated set
+        result = await session.execute(
+            select(FlashcardSet)
+            .where(FlashcardSet.id == set_id)
+        )
+        set_ = result.scalar_one()
+        
+        return jsonify({
+            'id': set_.id,
+            'name': set_.name,
+            'folder': set_.folder,
+            'flashcards': [{
+                'id': card.id,
+                'front': card.front,
+                'back': card.back,
+                'difficulty': card.difficulty,
+                'created_at': card.created_at.isoformat()
+            } for card in set_.flashcards],
+            'created_at': set_.created_at.isoformat()
+        })
+
+@flashcard_bp.route('/sets/<int:set_id>', methods=['DELETE'])
+@token_required
+async def delete_flashcard_set(current_user, set_id):
+    async with db.session() as session:
+        # Verify set ownership
+        result = await session.execute(
+            select(FlashcardSet)
+            .where(FlashcardSet.id == set_id)
+            .where(FlashcardSet.user_id == current_user.id)
+        )
+        set_ = result.scalar_one_or_none()
+        
+        if not set_:
+            return jsonify({'message': 'Set not found'}), 404
+            
+        await session.delete(set_)
+        await session.commit()
+        
+        return '', 204
+
+@flashcard_bp.route('/sets/copy', methods=['POST'])
+@token_required
+async def copy_flashcard_set(current_user):
+    data = await request.get_json()
+    
+    if 'set_id' not in data:
+        return jsonify({'message': 'Missing set_id'}), 400
+    
+    async with db.session() as session:
+        # Get original set
+        result = await session.execute(
+            select(FlashcardSet)
+            .where(FlashcardSet.id == data['set_id'])
+        )
+        original_set = result.scalar_one_or_none()
+        
+        if not original_set:
+            return jsonify({'message': 'Set not found'}), 404
+            
+        # Create new set
+        new_set = FlashcardSet(
+            name=f"{original_set.name} (Copy)",
+            folder=original_set.folder,
+            user_id=current_user.id,
+            hash_key=generate_hash_key('set', current_user.id, f"{original_set.name} (Copy)")
+        )
+        session.add(new_set)
+        await session.flush()  # Get new set ID
+        
+        # Copy cards
+        for card in original_set.flashcards:
+            new_card = Flashcard(
+                front=card.front,
+                back=card.back,
+                difficulty=card.difficulty,
+                set_id=new_set.id,
+                hash_key=generate_hash_key('card', new_set.id, card.front, card.back)
+            )
+            session.add(new_card)
+        
+        await session.commit()
+        
+        return jsonify({
+            'id': new_set.id,
+            'name': new_set.name,
+            'folder': new_set.folder,
+            'created_at': new_set.created_at.isoformat()
         }), 201
